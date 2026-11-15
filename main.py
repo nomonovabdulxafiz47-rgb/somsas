@@ -114,7 +114,7 @@ async def cmd_start(message: Message):
     if not await check_subscription(user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish",
-                                  url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
+                                  url=f"https://t.me/{CHANNEL_USERNAME.replace('@somsapos', '')}")],
             [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
         ])
         await message.answer(
