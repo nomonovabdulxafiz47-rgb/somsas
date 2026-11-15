@@ -221,7 +221,7 @@ async def get_apk(callback: CallbackQuery):
     await bot.send_document(
         chat_id=callback.message.chat.id,
         document=FSInputFile(APK_PATH),
-        caption="📱 Smart Sartaroshxona dasturi.\nO'rnatish uchun faylni oching.",
+        caption="📱 Somsa pos dasturini.\nO'rnatish uchun faylni oching.",
     )
 
 
