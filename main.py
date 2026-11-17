@@ -18,14 +18,26 @@ from aiogram.types import (
     Message,
 )
 
-TOKEN = "9080559382:AAHetIj4JeMCJLt2lEFdgZXsnsEGMp2oy4A"  # Eski tokenni BotFather orqali yangilang
+TOKEN = "9080559382:AAHetIj4JeMCJLt2lEFdgZXsnsEGMp2oy4A"
 CHANNEL_USERNAME = "@somsapos"
-ADMIN_ID = 7995649103
-ADMIN_USERNAME = "@Asilbek6008"
+
+# --- ADMINLAR ---
+ADMIN_IDS = [7995649103]  # ID raqami bilan adminlar
+ADMIN_USERNAMES = ["Asilbek6008", "Xomidjonov_a"]  # @ belgisisiz yoziladi
+ADMIN_PHONE_OR_SUPPORT = "@Asilbek6008"
 CARD_NUMBER = "4073 4200 7949 1878"
 CARD_HOLDER = "NAZARBEK NORBOYEV"
 APK_PATH = Path(__file__).parent / "app-release.apk"
 MONTHLY_PRICE = 9000
+
+
+# Admin ekanligini tekshiruvchi yordamchi funksiya
+def is_admin(user_id: int, username: str) -> bool:
+    if user_id in ADMIN_IDS:
+        return True
+    if username and username.lower() in [u.lower() for u in ADMIN_USERNAMES]:
+        return True
+    return False
 
 
 # Bazani sozlash
@@ -74,17 +86,23 @@ def has_access(balance: int, trial_end_str: str) -> bool:
     return datetime.datetime.now() <= trial_end or balance >= MONTHLY_PRICE
 
 
-async def show_main_menu(chat_id: int, user_id: int):
+async def show_main_menu(message: Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or ""
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Hisobim", callback_data="my_account"),
          InlineKeyboardButton(text="📱 APK yuklash", callback_data="get_apk")]
     ])
-    if user_id == ADMIN_ID:
+    
+    # Agar foydalanuvchi admin bo'lsa
+    if is_admin(user_id, username):
         keyboard.inline_keyboard.append(
             [InlineKeyboardButton(text="👑 Admin Panel", callback_data="admin_panel")]
         )
-    await bot.send_message(
-        chat_id, "Assalomu alaykum! Xush kelibsiz. Kerakli bo'limni tanlang:",
+        
+    await message.answer(
+        "Assalomu alaykum! Xush kelibsiz. Kerakli bo'limni tanlang:",
         reply_markup=keyboard
     )
 
@@ -107,14 +125,14 @@ async def cmd_start(message: Message):
             (user_id, full_name, username, trial_end, "active")
         )
     else:
-        cursor.execute("UPDATE users SET status = 'active' WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET status = 'active', username = ? WHERE user_id = ?", (username, user_id))
     conn.commit()
     conn.close()
 
     if not await check_subscription(user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish",
-                                  url=f"https://t.me/{CHANNEL_USERNAME.replace('@somsapos', '')}")],
+                                   url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
             [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
         ])
         await message.answer(
@@ -123,14 +141,14 @@ async def cmd_start(message: Message):
         )
         return
 
-    await show_main_menu(message.chat.id, user_id)
+    await show_main_menu(message)
 
 
 @dp.callback_query(F.data == "check_sub")
 async def process_check_sub(callback: CallbackQuery):
     if await check_subscription(callback.from_user.id):
         await callback.message.delete()
-        await show_main_menu(callback.message.chat.id, callback.from_user.id)
+        await show_main_menu(callback.message)
     else:
         await callback.answer("Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
 
@@ -177,7 +195,7 @@ async def top_up_menu(callback: CallbackQuery):
         f"Quyidagi karta raqamiga **{MONTHLY_PRICE:,} so'm** (yoki kerakli miqdor) o'tkazing:\n\n"
         f"💳 Karta: `{CARD_NUMBER}`\n"
         f"👤 Egasi: `{CARD_HOLDER}`\n\n"
-        f"Pulni o'tkazgandan so'ng chekni adminga yuboring va ID raqamingizni ayting: {ADMIN_USERNAME}\n\n"
+        f"Pulni o'tkazgandan so'ng chekni adminga yuboring va ID raqamingizni ayting: {ADMIN_PHONE_OR_SUPPORT}\n\n"
         f"🆔 Sizning ID raqamingiz: `{callback.from_user.id}`"
     )
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -186,7 +204,6 @@ async def top_up_menu(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
 
 
-# APK yuborish
 @dp.callback_query(F.data == "get_apk")
 async def get_apk(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -228,13 +245,13 @@ async def get_apk(callback: CallbackQuery):
 @dp.callback_query(F.data == "back_home")
 async def back_home(callback: CallbackQuery):
     await callback.message.delete()
-    await show_main_menu(callback.message.chat.id, callback.from_user.id)
+    await show_main_menu(callback.message)
 
 
 # --- ADMIN PANEL ---
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if not is_admin(callback.from_user.id, callback.from_user.username):
         await callback.answer("Siz admin emassiz!", show_alert=True)
         return
 
@@ -264,7 +281,7 @@ async def admin_panel(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_add_balance")
 async def admin_add_balance_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    if not is_admin(callback.from_user.id, callback.from_user.username):
         return
     await callback.message.answer("Foydalanuvchining ID raqamini kiriting:")
     await state.set_state(AdminStates.waiting_for_user_id)
@@ -273,7 +290,7 @@ async def admin_add_balance_start(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_user_id)
 async def admin_get_user_id(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not is_admin(message.from_user.id, message.from_user.username):
         return
     try:
         target_id = int(message.text)
@@ -286,7 +303,7 @@ async def admin_get_user_id(message: Message, state: FSMContext):
 
 @dp.message(AdminStates.waiting_for_amount)
 async def admin_get_amount(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not is_admin(message.from_user.id, message.from_user.username):
         return
     try:
         amount = int(message.text)
