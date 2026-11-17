@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import logging
 import os
 import sqlite3
@@ -22,13 +21,9 @@ TOKEN = "9080559382:AAHetIj4JeMCJLt2lEFdgZXsnsEGMp2oy4A"
 CHANNEL_USERNAME = "@somsapos"
 
 # --- ADMINLAR ---
-ADMIN_IDS = [7995649103]  # ID raqami bilan adminlar
-ADMIN_USERNAMES = ["Asilbek6008", "Xomidjonov_a"]  # @ belgisisiz yoziladi
-ADMIN_PHONE_OR_SUPPORT = "@Asilbek6008"
-CARD_NUMBER = "4073 4200 7949 1878"
-CARD_HOLDER = "NAZARBEK NORBOYEV"
+ADMIN_IDS = [7995649103, 6342803772]  # Asilbek va @Xomidjonov_a ning ID raqamlari
+ADMIN_USERNAMES = ["Asilbek6008", "Xomidjonov_a"]
 APK_PATH = Path(__file__).parent / "app-release.apk"
-MONTHLY_PRICE = 9000
 
 
 # Admin ekanligini tekshiruvchi yordamchi funksiya
@@ -40,7 +35,7 @@ def is_admin(user_id: int, username: str) -> bool:
     return False
 
 
-# Bazani sozlash
+# Bazani sozlash (faqat foydalanuvchilarni saqlash uchun)
 def init_db():
     conn = sqlite3.connect("bot_base.db")
     conn.execute("""
@@ -48,8 +43,6 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
             username TEXT,
-            balance INTEGER DEFAULT 0,
-            trial_end TEXT,
             status TEXT DEFAULT 'active'
         )
     """)
@@ -68,11 +61,6 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 
-class AdminStates(StatesGroup):
-    waiting_for_user_id = State()
-    waiting_for_amount = State()
-
-
 async def check_subscription(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
@@ -81,21 +69,15 @@ async def check_subscription(user_id: int) -> bool:
         return False
 
 
-def has_access(balance: int, trial_end_str: str) -> bool:
-    trial_end = datetime.datetime.strptime(trial_end_str, "%Y-%m-%d %H:%M:%S")
-    return datetime.datetime.now() <= trial_end or balance >= MONTHLY_PRICE
-
-
 async def show_main_menu(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or ""
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Hisobim", callback_data="my_account"),
-         InlineKeyboardButton(text="📱 APK yuklash", callback_data="get_apk")]
+        [InlineKeyboardButton(text="📱 APK yuklash", callback_data="get_apk")]
     ])
     
-    # Agar foydalanuvchi admin bo'lsa
+    # Agar foydalanuvchi admin bo'lsa, Admin Panel tugmasi qo'shiladi
     if is_admin(user_id, username):
         keyboard.inline_keyboard.append(
             [InlineKeyboardButton(text="👑 Admin Panel", callback_data="admin_panel")]
@@ -119,10 +101,9 @@ async def cmd_start(message: Message):
     user = cursor.fetchone()
 
     if not user:
-        trial_end = (datetime.datetime.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO users (user_id, full_name, username, trial_end, status) VALUES (?, ?, ?, ?, ?)",
-            (user_id, full_name, username, trial_end, "active")
+            "INSERT INTO users (user_id, full_name, username, status) VALUES (?, ?, ?, ?)",
+            (user_id, full_name, username, "active")
         )
     else:
         cursor.execute("UPDATE users SET status = 'active', username = ? WHERE user_id = ?", (username, user_id))
@@ -153,81 +134,13 @@ async def process_check_sub(callback: CallbackQuery):
         await callback.answer("Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
 
 
-@dp.callback_query(F.data == "my_account")
-async def my_account(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT balance, trial_end FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-
-    if not user:
-        await callback.answer("Avval /start buyrug'ini yuboring.", show_alert=True)
-        return
-
-    balance, trial_end_str = user
-    trial_end = datetime.datetime.strptime(trial_end_str, "%Y-%m-%d %H:%M:%S")
-    if datetime.datetime.now() < trial_end:
-        left_days = (trial_end - datetime.datetime.now()).days
-        trial_status = f"🎁 Bepul sinov muddati: {left_days} kun qoldi\n"
-    else:
-        trial_status = "❌ Bepul sinov muddati tugagan\n"
-
-    text = (
-        f"👤 **Sizning ma'lumotlaringiz:**\n\n"
-        f"🆔 ID: `{user_id}`\n"
-        f"💰 Balansingiz: **{balance} so'm**\n"
-        f"{trial_status}"
-        f"📌 Oylik to'lov: **{MONTHLY_PRICE:,} so'm / oy**"
-    )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Hisobni to'ldirish", callback_data="top_up")],
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_home")]
-    ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-
-
-@dp.callback_query(F.data == "top_up")
-async def top_up_menu(callback: CallbackQuery):
-    text = (
-        f"💳 **Hisobni to'ldirish uchun:**\n\n"
-        f"Quyidagi karta raqamiga **{MONTHLY_PRICE:,} so'm** (yoki kerakli miqdor) o'tkazing:\n\n"
-        f"💳 Karta: `{CARD_NUMBER}`\n"
-        f"👤 Egasi: `{CARD_HOLDER}`\n\n"
-        f"Pulni o'tkazgandan so'ng chekni adminga yuboring va ID raqamingizni ayting: {ADMIN_PHONE_OR_SUPPORT}\n\n"
-        f"🆔 Sizning ID raqamingiz: `{callback.from_user.id}`"
-    )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="my_account")]
-    ])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-
-
+# APK yuborish
 @dp.callback_query(F.data == "get_apk")
 async def get_apk(callback: CallbackQuery):
     user_id = callback.from_user.id
 
     if not await check_subscription(user_id):
         await callback.answer("Avval kanalga obuna bo'ling!", show_alert=True)
-        return
-
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT balance, trial_end FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-
-    if not user:
-        await callback.answer("Avval /start buyrug'ini yuboring.", show_alert=True)
-        return
-
-    balance, trial_end_str = user
-    if not has_access(balance, trial_end_str):
-        await callback.answer(
-            "❌ Sinov muddati tugagan yoki balans yetarli emas. Hisobni to'ldiring.",
-            show_alert=True
-        )
         return
 
     if not APK_PATH.exists():
@@ -273,60 +186,9 @@ async def admin_panel(callback: CallbackQuery):
         f"❌ Botni tark etganlar/bloklaganlar: {blocked_users}"
     )
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💵 Foydalanuvchiga pul qo'shish", callback_data="admin_add_balance")],
         [InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="back_home")]
     ])
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-
-
-@dp.callback_query(F.data == "admin_add_balance")
-async def admin_add_balance_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id, callback.from_user.username):
-        return
-    await callback.message.answer("Foydalanuvchining ID raqamini kiriting:")
-    await state.set_state(AdminStates.waiting_for_user_id)
-    await callback.answer()
-
-
-@dp.message(AdminStates.waiting_for_user_id)
-async def admin_get_user_id(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id, message.from_user.username):
-        return
-    try:
-        target_id = int(message.text)
-        await state.update_data(target_id=target_id)
-        await message.answer("Qancha pul qo'shmoqchisiz? (Masalan: 9000):")
-        await state.set_state(AdminStates.waiting_for_amount)
-    except ValueError:
-        await message.answer("Iltimos, to'g'ri ID raqamini kiriting (faqat raqam):")
-
-
-@dp.message(AdminStates.waiting_for_amount)
-async def admin_get_amount(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id, message.from_user.username):
-        return
-    try:
-        amount = int(message.text)
-    except ValueError:
-        await message.answer("Iltimos, summani raqam bilan kiriting:")
-        return
-
-    data = await state.get_data()
-    target_id = data["target_id"]
-
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, target_id))
-    conn.commit()
-    conn.close()
-
-    await message.answer(f"✅ Foydalanuvchi (`{target_id}`) balansiga {amount} so'm qo'shildi!")
-    await state.clear()
-
-    try:
-        await bot.send_message(target_id, f"🎉 Hisobingizga admin tomonidan {amount} so'm qo'shildi!")
-    except Exception:
-        pass
 
 
 # --- RENDER UCHUN PORT OCHUVCHI WEB SERVER ---
